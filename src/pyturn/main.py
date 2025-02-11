@@ -2,111 +2,261 @@
 #Crear un sistema para guardar los numeros de telefono y nombre de los pacientes.
 #Interfaz para poder agregar, eliminar pacientes. Conexion con Google SpreadSheet u otro sistema de almacenamiento.
 #Crear un sistema de notificaciones para recordar los turnos de los pacientes automaticamente.
+#Mejorar interfaz con CustomTkinter.
 
-import os.path
 import tkinter as tk
-
-from tkinter import messagebox, Listbox, Scrollbar
+import traceback
+import sys
+import os.path
+import configparser
+import customtkinter as ctk
+from tkinter import messagebox, Listbox, Scrollbar, PhotoImage
+from PIL import ImageTk, Image
 from datetime import datetime, timezone
-
-from util import format_event_date, access_calendar
-from pacient import create_pacient
+from util import access_calendar, access_sheet
+from pacient import create_pacient, edit_pacient, delete_pacient, btn_pacient_click, index_selected
 #from turn import 
+from functools import partial
 
-# If modifying these scopes, delete the file token.json.
 
-#def show_event_details(event):
-#    details = f"Título: {event.get('summary', 'Sin título')}\n" \
-#              f"Inicio: {event['start'].get('dateTime', event['start'].get('date'))}\n" \
-#              f"Fin: {event['end'].get('dateTime', event['end'].get('date'))}\n" \
-#              f"Descripción: {event.get('description', 'Sin descripción')}"
-#    messagebox.showinfo("Detalles del evento", details)
+#-------------------Window Preparation/Events-------------------#
 
-def visualize_reminders():
-    events = access_calendar()
-    if not events:
-        messagebox.showinfo("Eventos", "No hay eventos próximos.")
-        return
-  
-    now = datetime.now(timezone.utc)
+#Centrar y redimensionar la ventana.
+def center_and_resize_window(window):
 
-    # Añadir eventos a la lista
-    future_events = []
-    for event in events:
-        start_str = event['start'].get('dateTime', event['start'].get('date'))
-        try:
-            start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
-            
-            # Si el evento tiene un datetime sin zona horaria (naive), le asignamos zona horaria UTC
-            if start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
-            
-            # Solo eventos futuros
-            if start > now:
-                future_events.append((start, event))
-        except ValueError:
-            continue  # Ignorar eventos sin hora específica (de todo el día)
-      
-    future_events.sort(key=lambda x: x[0])
+    if window.title() == "PyTurn":
+        width_ratio = 0.2
+        height_ratio = 0.2
+    elif window.title() == "PyTurn - Turnos":
+        width_ratio = 0.2
+        height_ratio = 0.2
+    elif window.title() == "PyTurn - Pacientes":
+        width_ratio = 0.2
+        height_ratio = 0.251
+    elif window.title() == "PyTurn - Configuración":
+        width_ratio = 0.3
+        height_ratio = 0.124
 
-    # Crear una ventana para listar los eventos
-    event_window = tk.Toplevel()
-    event_window.title("Seleccionar evento")
-    event_window.geometry("400x300")
+    screen_width = window.winfo_screenwidth()
+    screen_height = window.winfo_screenheight()
+    #screen_width = 1920
+    #screen_height = 1080
 
-    scrollbar = Scrollbar(event_window)
-    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    # Calcular tamaño de la ventana en base a la resolución de la pantalla
+    width = int(screen_width * width_ratio)
+    height = int(screen_height * height_ratio)
 
-    event_listbox = Listbox(event_window, yscrollcommand=scrollbar.set, width=50, height=15)
-    event_listbox.pack(pady=20)
-    scrollbar.config(command=event_listbox.yview)
+    # Calcular posición para centrar la ventana
+    x_position = (screen_width - width) // 2
+    y_position = (screen_height - height) // 2
 
-    for start, event in future_events:
-        formatted_start = format_event_date(event['start'].get('dateTime', event['start'].get('date')))
-        event_listbox.insert(tk.END, f"{formatted_start} - {event.get('summary', 'Sin título')}")
+    # Aplicar tamaño y posición
+    window.geometry(f"{width}x{height}+{x_position}+{y_position}")
 
-  # Función para mostrar detalles del evento seleccionado
-  #def on_event_select(event):
-  #    selected_index = event_listbox.curselection()
-  #    if selected_index:
-  #        selected_event = events[selected_index[0]]
-  #        show_event_details(selected_event)
+def prepare_interface(window_type):
 
-  #event_listbox.bind("<Double-1>", on_event_select)
+    if window_type == "main":
+        window = ctk.CTk()
+    else:
+        window = ctk.CTkToplevel()
 
+    if window_type == "turn":
+        window.title("PyTurn - Turnos")
+    elif window_type == "pacient":
+        window.title("PyTurn - Pacientes")
+    elif window_type == "config":
+        window.title("PyTurn - Configuración")
+    else:
+        window.title("PyTurn")
+
+    center_and_resize_window(window)
+    window.resizable(False, False)
+    window.protocol("WM_DELETE_WINDOW", disable_event)
+    #window.report_callback_exception = show_error
+
+    return window
+
+def return_to_menu(current_window):
+    current_window.destroy()
+    main_window.deiconify()
+
+def disable_event():
+    if main_window.state() == "normal":
+        main_window.destroy()
+
+def show_error(*args):
+    err = traceback.format_exception(*args)
+    messagebox.showerror('Exception', err)
+    sys.exit()
+
+#----------------------------------------------------#
+
+
+#-------------------Window Creation-------------------#
+
+#Crear interfaz para los turnos.
+def create_turn_window():
+    main_window.withdraw()
+    window = prepare_interface("turn")
+
+    back_button = ctk.CTkButton(window, text="Volver", command=lambda: return_to_menu(window))
+    back_button.pack(pady=5)
+
+    window.mainloop()
+    
+#Crear interfaz para los pacientes.
+def create_pacient_window():
+    main_window.withdraw()
+    window = prepare_interface("pacient")
+    window.columnconfigure(0, weight=1)
+    
+    try:
+        pacients = access_sheet()
+        array_pacients = []
+        for pacient in pacients[1:]:
+            array_pacients.append(pacient)
+
+    except Exception as error:
+        if error.__class__.__name__ == "RefreshError":
+            os.remove("token.json")
+            access_sheet()
+        else:
+            messagebox.showerror("Error", f"No se pudo acceder a la hoja de calculo.\n{error}")
+
+    frame = ctk.CTkScrollableFrame(window)
+    frame.grid(row=0, column=0, pady=10, padx=10, sticky="nsew")
+
+    frame2 = ctk.CTkFrame(window)
+    frame2.grid(row=0, column=1, pady=10, padx=10, sticky="nw")
+    frame2.configure(fg_color="transparent")
+
+    label_info= ctk.CTkLabel(window, text="")
+    label_info.grid(row=0, column=1, pady=10, padx=10, sticky="sw")
+    label_info.configure(justify="left")
+
+    create_button = ctk.CTkButton(frame2, text="Añadir", command=lambda: create_pacient(window, 0, ""))
+    create_button.grid(row=0, column=1, pady=5, padx=5)
+
+    edit_button = ctk.CTkButton(frame2, text="Editar", state="disabled", command=lambda: edit_pacient(window))
+    edit_button.grid(row=1, column=1, pady=5, padx=5)
+
+    delete_button = ctk.CTkButton(frame2, text="Eliminar", state="disabled", command=lambda: delete_pacient(pacients))
+    delete_button.grid(row=2, column=1, pady=5, padx=5)
+
+    for pacient in pacients[1:]:
+        btn_pacient = ctk.CTkButton(frame, text=str(pacient[0]), fg_color="transparent")
+        btn_pacient.grid(row=pacients.index(pacient), column=0, padx=5, sticky="w")
+        btn_pacient.configure(command=lambda btn=btn_pacient, pacient=pacient: btn_pacient_click(btn, frame, frame2, label_info, pacient, pacients))
+
+    #save_image = Image.open("src/pyturn/assets/save.png")
+    #save_image2 = ctk.CTkImage(save_image)
+    #save_button = ctk.CTkButton(window, text="Guardar", image=save_image2, command=lambda: save_pacients(window))
+    #save_button.grid(row=1, column=1, padx=10, sticky="e")
+
+    back_button = ctk.CTkButton(window, text="Volver", command=lambda: return_to_menu(window))
+    back_button.grid(row=1, column=0, padx=10, sticky="w")
+
+    window.mainloop()
+
+def create_config_window():
+    main_window.withdraw()
+    window = prepare_interface("config")
+    config = configparser.ConfigParser()
+    config.read('.config')
+    window.columnconfigure(0, weight=1)
+
+    screen_width = window.winfo_screenwidth()
+    width_ratio = 0.3
+
+    frame = ctk.CTkFrame(window)
+    frame.grid(row=0, column=0, pady=10, padx=10)
+
+    label_excel_url = ctk.CTkLabel(frame, text="Excel URL:")
+    label_excel_url.grid(row=0, column=0, padx=10, pady=5, sticky="e")
+    entry_excel_url = ctk.CTkEntry(frame)
+    entry_excel_url.insert(0, config.get("CONFIG", "GOOGLE_SHEET_URL"))
+    entry_excel_url.grid(row=0, column=1, padx=10, pady=5, ipadx=(screen_width-width_ratio)/15, sticky="w")
+
+    label_whatsapp_number = ctk.CTkLabel(frame, text="Número de WhatsApp:")
+    label_whatsapp_number.grid(row=1, column=0, padx=10, pady=5, sticky="w")
+    entry_whatsapp_number = ctk.CTkEntry(frame)
+    entry_whatsapp_number.insert(0, config.get("CONFIG", "WHATSAPP_NUMBER"))
+    entry_whatsapp_number.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+
+    save_image = Image.open("src/pyturn/assets/save.png")
+    save_image2 = ctk.CTkImage(save_image)
+    save_button = ctk.CTkButton(window, text="Guardar", image=save_image2, command=lambda: save_config(entry_excel_url, entry_whatsapp_number, window))
+    save_button.grid(row=1, column=0, padx=10, sticky="e")
+
+    back_button = ctk.CTkButton(window, text="Volver", command=lambda: return_to_menu(window))
+    back_button.grid(row=1, column=0, padx=10, sticky="w")
+
+    window.mainloop()
+
+#----------------------------------------------------#
+
+
+#-------------------Functions-------------------#
+
+#Edit the .config file to save the configuration.
+def save_config(entry_excel_url, entry_whatsapp_number, window):
+    config = configparser.ConfigParser()
+    config.read('.config')
+    config.set("CONFIG", "GOOGLE_SHEET_URL", entry_excel_url.get())
+    config.set("CONFIG", "GOOGLE_SHEET_ID", entry_excel_url.get().split("/")[5])
+    config.set("CONFIG", "WHATSAPP_NUMBER", entry_whatsapp_number.get())
+    with open('.config', 'w') as configfile:
+        config.write(configfile)
+
+    return_to_menu(window)
+
+def save_pacients():
+    pass
 
 #Enviar recordatorio a los pacientes con un margen de 48 horas.
 def send_reminders():
     pass
 
-
-#Crear interfaz para los turnos.
-def create_turn_interface():
-    pass
+#----------------------------------------------------#
 
 
-#Crear interfaz para los pacientes.
-def create_pacient_interface():
-    pass
-
+#-------------------Main-------------------#
 
 #Crear interfaz para las opciones de la aplicacion.
-def create_login_interface():
-    window = tk.Tk()
-    window.title("Recordatorios Calendario")
-    window.geometry("400x400")
+def create_main_window():
+    global main_window
+    main_window = prepare_interface("main")
+
     try:
         access_calendar()
     except Exception as error:
-        messagebox.showerror("Error", f"No se pudo acceder al calendario.\n{error}")
-        window.destroy()
+        if error.__class__.__name__ == "RefreshError":
+            os.remove("token.json")
+            access_calendar()
+        else:
+            messagebox.showerror("Error", f"No se pudo acceder al calendario.\n{error}")
+            main_window.destroy()
 
-    turn_interface = tk.Button(window, text="Turnos", command=create_turn_interface)
-    turn_interface.pack(pady=5)
+    frame = ctk.CTkFrame(main_window)
+    frame.pack(expand=True)
 
-    pacient_interface = tk.Button(window, text="Pacientes", command=create_pacient_interface)
-    pacient_interface.pack(pady=5)
+    config_image = Image.open("src/pyturn/assets/config.png")
+    config_image2 = ctk.CTkImage(config_image)
+    config_button = ctk.CTkButton(main_window, text="Configuración", command=create_config_window, image=config_image2)
+    config_button.pack(pady=10, padx=10, anchor="e")
 
-    window.mainloop()
+    label = ctk.CTkLabel(frame, text="PyTurn")
+    label.pack(pady=5)
 
-create_login_interface()
+    turn_interface = ctk.CTkButton(frame, text="Turnos", command=create_turn_window)
+    turn_interface.pack(pady=5, padx=10)
+
+    pacient_interface = ctk.CTkButton(frame, text="Pacientes", command=create_pacient_window)
+    pacient_interface.pack(pady=10, padx=10)
+
+    main_window.mainloop()
+
+
+create_main_window()
+
+#----------------------------------------------------#

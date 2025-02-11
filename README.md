@@ -1,0 +1,1 @@
+A Python script integrated with Google API's to send reminders of turns to pacients.

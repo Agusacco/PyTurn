@@ -1,4 +1,5 @@
 import os.path
+import configparser
 from datetime import datetime
 from tkinter import messagebox
 from google.oauth2.credentials import Credentials
@@ -8,9 +9,13 @@ from googleapiclient.discovery import build
 from dotenv import load_dotenv
 
 load_dotenv()
-SCOPES = ["https://www.googleapis.com/auth/calendar"]
+SCOPES = ["https://www.googleapis.com/auth/calendar",
+          "https://www.googleapis.com/auth/spreadsheets"]
 GOOGLE_CALENDAR_TOKEN = os.getenv('GOOGLE_CALENDAR_TOKEN')
 GOOGLE_CALENDAR_CLIENT_SECRET = os.getenv('GOOGLE_CALENDAR_CLIENT_SECRET')
+
+config = configparser.ConfigParser()
+config.read(".config")
 
 def format_event_date(event_date_str):
     # Convertir la fecha de formato ISO 8601 al formato deseado: DD/MM/YYYY HH:MM
@@ -23,8 +28,23 @@ def format_event_date(event_date_str):
         formatted_date = event_date.strftime("%d/%m/%Y")
     return formatted_date
 
+def access_sheet():
+    creds = authenticate_google_credentials()
+    try:
+        service = build('sheets', 'v4', credentials=creds)
+        # Lista algunas hojas para probar la conexión
+        sheet = service.spreadsheets()
+        result = sheet.values().get(spreadsheetId=(config.get("CONFIG", "GOOGLE_SHEET_ID")),
+                                    range='A1:B500').execute()
+        values = result.get('values', [])
+        return values
+
+    except Exception as error:
+        messagebox.showerror("Error", f"No se pudo acceder a la hoja de cálculo.\n{error}")
+        return []
+
 def access_calendar():
-    creds = authenticate_google_calendar()
+    creds = authenticate_google_credentials()
     try:
         service = build('calendar', 'v3', credentials=creds)
         # Lista algunos eventos próximos para probar la conexión
@@ -36,7 +56,7 @@ def access_calendar():
         messagebox.showerror("Error", f"No se pudo acceder al calendario.\n{error}")
         return []
   
-def authenticate_google_calendar():
+def authenticate_google_credentials():
     creds = None
     # Verifica si ya existen credenciales
     if os.path.exists('token.json'):
