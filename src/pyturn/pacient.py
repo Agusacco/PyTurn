@@ -1,5 +1,6 @@
 import tkinter as tk
 import customtkinter as ctk
+from util import access_sheet
 
 index_selected = None
 
@@ -15,7 +16,6 @@ def btn_pacient_click(btn, frame, frame2, label, pacient, pacients):
     label.configure(text=str(pacient[0])+"\nTel. "+str(pacient[1]))
     index_selected = pacients.index(pacient)
     return index_selected
-
 
 #Crea un nuevo paciente.
 def create_pacient(window, flag, input):
@@ -43,7 +43,6 @@ def create_pacient(window, flag, input):
             elif phone_input.isnumeric() == False:
                 raise Exception("El teléfono del paciente debe contener solo números.")
             else:
-                print("Paciente ingresado.\nNombre: "+input+"\nTeléfono: "+phone_input)
                 window.attributes("-disabled", False)
                 window.focus_force()
                 
@@ -56,8 +55,14 @@ def edit_pacient():
     pass
 
 #Borra un paciente.
-def delete_pacient(pacients):
+def delete_pacient(pacients, window, main_window):
+    from window import create_pacient_window
+    window.attributes("-disabled", True) 
     pacient = pacients[index_selected]
+
     ask_delete = tk.messagebox.askyesno("askyesno", "Vas a eliminar el paciente "+str(pacient[0])+".\n¿Estás seguro?")
     if ask_delete:
-        print("Paciente eliminado.\n"+str(pacient[0]))+"\nTel. "+str(pacient[1])
+        range = index_selected+1
+        access_sheet("delete_row", range)
+        window.destroy()
+        create_pacient_window(main_window)

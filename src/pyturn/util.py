@@ -28,16 +28,44 @@ def format_event_date(event_date_str):
         formatted_date = event_date.strftime("%d/%m/%Y")
     return formatted_date
 
-def access_sheet():
+def access_sheet(function, range):
     creds = authenticate_google_credentials()
     try:
+        has_result = False
         service = build('sheets', 'v4', credentials=creds)
-        # Lista algunas hojas para probar la conexión
         sheet = service.spreadsheets()
-        result = sheet.values().get(spreadsheetId=(config.get("CONFIG", "GOOGLE_SHEET_ID")),
-                                    range='A1:B500').execute()
-        values = result.get('values', [])
-        return values
+
+        #Load the pacient list.
+        if function == "access_pacients":
+            result = sheet.values().get(spreadsheetId=(config.get("CONFIG", "GOOGLE_SHEET_ID")),
+                                        range=range).execute()
+            has_result = True
+
+        #Delete row from the sheet. 
+        elif function == "delete_row":
+            #sheet.values().batchClear(spreadsheetId=(config.get("CONFIG", "GOOGLE_SHEET_ID")),
+                                        #body={"ranges": [range]}).execute()
+            sheet.batchUpdate(
+                spreadsheetId=config.get("CONFIG", "GOOGLE_SHEET_ID"),
+                body={
+                    "requests": [
+                        {
+                            "deleteDimension": {
+                                "range": {
+                                    "sheetId": 0,  # ID de la hoja dentro del documento
+                                    "dimension": "ROWS",
+                                    "startIndex": range - 1,  # Google Sheets usa base 0
+                                    "endIndex": range  # Elimina solo esa fila
+                                }
+                            }
+                        }
+                    ]
+                }
+            ).execute()
+            
+        if has_result == True:
+            values = result.get('values', [])
+            return values                   
 
     except Exception as error:
         messagebox.showerror("Error", f"No se pudo acceder a la hoja de cálculo.\n{error}")
